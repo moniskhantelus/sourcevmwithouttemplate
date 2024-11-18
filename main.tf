@@ -34,7 +34,7 @@ locals {
   )
 }
    
-
+/*
 # Find the latest snapshot (this example uses a data source lookup)
 data "google_compute_snapshot" "latest_snapshot" {
   project = var.project_id
@@ -49,7 +49,7 @@ resource "google_compute_disk" "from_snapshot" {
   zone        = var.zone # Adjust the zone as needed
   snapshot = data.google_compute_snapshot.latest_snapshot.self_link
 }
-
+*/
 ####################
 # Instance 
 ####################
