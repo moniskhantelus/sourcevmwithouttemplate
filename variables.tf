@@ -10,12 +10,25 @@ variable "subnetwork" {
   default     = ""
 }
 
+variable "snapshot_name" {
+  description = "snapshot name for latest snapshot"
+}
+
 variable "subnetwork_project" {
   description = "The project that subnetwork belongs to"
   type        = string
   default     = ""
 }
 
+variable "snapshotfilter" {
+  description = "This is a snapshot filter to find the latest snapshot"
+  type        = string
+  default     = ""
+}
+variable "use_image" {
+  description = "Toggle between using an image or a snapshot for VM creation"
+  type        = bool
+}
 
 variable "hostname" {
   description = "Hostname of instances"
@@ -209,19 +222,19 @@ variable "resource_policies" {
 variable "source_image" {
   description = "Source disk image. If neither source_image nor source_image_family is specified, defaults to the latest public Rocky Linux 9 optimized for GCP image."
   type        = string
-  default     = "debian-11-bullseye-v20240515"
+  default     = ""
 }
 
 variable "source_image_family" {
   description = "Source image family. If neither source_image nor source_image_family is specified, defaults to the latest public Rocky Linux 9 optimized for GCP image."
   type        = string
-  default     = "debian-11"
+  default     = ""
 }
 
 variable "source_image_project" {
   description = "Project where the source image comes from. The default project contains Rocky Linux images."
   type        = string
-  default     = "debian-cloud"
+  default     = ""
 }
 
 variable "disk_size_gb" {
@@ -451,75 +464,73 @@ EOF
   })
   default = null
 }
-/*#Mandatory input variables
-variable "project_id" {
-  description = "project name"
+//********************************//
+
+variable "name" {
+  description = "Name of the resource policy to create"
   type        = string
 }
 
-variable "region" {
-  description = "google region"
-  type        = string
-  default     = "northamerica-northeast1"
-}
-
-variable "gce_instance" {
-  description = "a gce instance"
-  type = object({
-    name                      = string
-    hostname                  = optional(string)
-    description               = string
-    desired_status            = optional(string)
-    deletion_protection       = optional(bool)
-    machine_type              = string
-    zone                      = string
-    allow_stopping_for_update = optional(bool)
-    enable_display            = optional(bool)
-    disks                     = optional(list(map(string)))
-    region_disks              = optional(list(map(string)))
-    attached_disks            = optional(list(map(string)))
-    additional_disks          = optional(list(map(string)))
-    network                   = list(map(string))
-    tags                      = optional(list(string))
-    labels                    = optional(map(string))
-    automatic_restart         = optional(bool)
-    node_affinities           = optional(map(string))
-    on_host_maintenance       = optional(string)
-    preemptible               = optional(bool)
-    metadata                  = optional(map(string))
-    service_account_email     = optional(string)
-    service_account_scopes    = optional(list(string))
-    resource_policies         = optional(list(string))
-  })
-  default = {
-    name                      = null
-    hostname                  = null
-    description               = null
-    desired_status            = null
-    deletion_protection       = false
-    image                     = null
-    machine_type              = null
-    zone                      = null
-    allow_stopping_for_update = true
-    enable_display            = false
-    disks                     = null
-    region_disks              = null
-    attached_disks            = null
-    additional_disks          = null
-    network                   = null
-    tags                      = null
-    labels                    = null
-    automatic_restart         = true
-    node_affinities = {
-      key      = null
-      operator = null
-      values   = null
+variable "snapshot_retention_policy" {
+  description = "The retention policy to be applied to the schedule policy. For more details see https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_resource_policy#retention_policy"
+  type = object(
+    {
+      max_retention_days    = number
+      on_source_disk_delete = string
     }
-    on_host_maintenance    = "MIGRATE"
-    preemptible            = false
-    metadata               = null
-    service_account_email  = null
-    service_account_scopes = null
-    resource_policies      = null
-  }
-}*/
+  )
+}
+
+variable "snapshot_schedule" {
+  description = "The scheduled to be used by the snapshot policy. For more details see https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_resource_policy#schedule"
+  type = object(
+    {
+      daily_schedule = object(
+        {
+          days_in_cycle = number
+          start_time    = string
+        }
+      )
+      hourly_schedule = object(
+        {
+          hours_in_cycle = number
+          start_time     = string
+        }
+      )
+      weekly_schedule = object(
+        {
+          day_of_weeks = set(object(
+            {
+              day        = string
+              start_time = string
+            }
+          ))
+        }
+      )
+    }
+  )
+}
+
+variable "snapshot_properties" {
+  description = "The properties of the schedule policy. For more details see https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_resource_policy#snapshot_properties"
+  type = object(
+    {
+      guest_flush       = bool
+      labels            = map(string)
+      storage_locations = list(string)
+    }
+  )
+  default = null
+}
+
+variable "disks" {
+  description = "List of self_links persistent disks to attach the snapshot policy to (ie. projects/project_id/disks/diskname/zones/zone_name)"
+  type        = list(string)
+  default     = []
+}
+
+variable "module_depends_on" {
+  description = "List of modules or resources this module depends on"
+  type        = list(any)
+  default     = []
+}
