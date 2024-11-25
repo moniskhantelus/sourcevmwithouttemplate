@@ -7,7 +7,12 @@ locals {
   network_interface = length(format("%s%s", var.network, var.subnetwork)) == 0 ? [] : [1]
   boot_disk = "${var.source_image}" != "" ? var.source_image : "debian-11-bullseye-v20240515"
 }
-
+locals {
+   bootdiskname      = var.use_image == true ? var.hostname : var.snapshot_name
+}
+locals {
+  instance_disks = [for i in range(1) : "projects/${var.project_id}/disks/${local.bootdiskname}/zones/${var.zone}"]
+}
 #########
 # Locals
 #########
@@ -33,35 +38,33 @@ locals {
     var.preemptible || var.spot ? true : false
   )
 }
-   
-/*
-# Find the latest snapshot (this example uses a data source lookup)
+
+# Find the latest snapshot 
 data "google_compute_snapshot" "latest_snapshot" {
   project = var.project_id
-  filter      = "name = snapshot-*"  # Adjust filter as needed
+  filter      = "name = ${var.snapshotfilter}*"  
   most_recent = true
 }
 resource "google_compute_disk" "from_snapshot" {
+  count       = var.use_image == false ? 1 : 0
   project     = var.project_id
-  name        = "disk-from-latest-snapshot"
-  size        = 200    # Specify size in GB (must be equal to or larger than the snapshot)
-  type        = "pd-standard"  # Adjust disk type as needed
-  zone        = var.zone # Adjust the zone as needed
+  name        = var.snapshot_name
+  size        = 200    
+  type        = "pd-standard"  
+  zone        = var.zone
   snapshot = data.google_compute_snapshot.latest_snapshot.self_link
 }
-*/
+
 ####################
 # Instance 
 ####################
 
 resource "google_compute_instance" "tpl" {
-  provider                = google-beta
+  provider            = google-beta
   count               = local.num_instances
   name                = local.hostname //var.add_hostname_suffix ? format("%s%s%s", local.hostname, var.hostname_suffix_separator, format("%03d", count.index + 1)) : local.hostname
   project             = local.project_id
-  # name                    = var.hostname
-   zone                    = var.zone 
-  # project                 = var.project_id
+  zone                    = var.zone 
   machine_type            = var.machine_type
   labels                  = var.labels
   metadata                = var.metadata
@@ -71,19 +74,22 @@ resource "google_compute_instance" "tpl" {
   deletion_protection = var.deletion_protection
   desired_status      = var.desired_status                
   min_cpu_platform        = var.min_cpu_platform
-  resource_policies       = var.resource_policies
-  //boot_disk = "${var.bootdisk}" == "image" ? local.boot-image : local.boot-snapshot
-   
-   boot_disk {
-      auto_delete  = var.auto_delete
-     // source = google_compute_disk.from_snapshot.id
-    initialize_params {
-      image = var.source_image != "" ? format("${local.source_image_project}/${local.source_image}") : format("${local.source_image_project}/${local.source_image_family}")
-      size = var.disk_size_gb
-      type    = var.disk_type
-      labels  = var.disk_labels
-   }        
-   }
+  resource_policies       = var.resource_policies   
+
+boot_disk {
+  auto_delete = var.auto_delete
+  dynamic "initialize_params" {
+    for_each = var.use_image ? [1] : []
+    content {
+      image  = var.source_image != "" ? format("${local.source_image_project}/${local.source_image}") : format("${local.source_image_project}/${local.source_image_family}")
+      size   = var.disk_size_gb
+      type   = var.disk_type
+      labels = var.disk_labels  
+    }
+  }
+  # Use snapshot as source if not using an image
+  source = var.use_image ? null : google_compute_disk.from_snapshot[0].id
+}
 
     dynamic "attached_disk" {
     for_each = var.additional_disks
@@ -224,4 +230,74 @@ resource "google_compute_disk" "additional" {
    size = var.additional_disks[count.index].disk_size_gb
 
 }
+resource "null_resource" "module_depends_on" {
+  triggers = {
+    value = length(var.module_depends_on)
+  }
+  depends_on = [ google_compute_instance.tpl ]
+}
 
+resource "google_compute_resource_policy" "policy" {
+  name    = var.name
+  project = var.project_id
+  region  = var.region
+
+  snapshot_schedule_policy {
+    retention_policy {
+      max_retention_days    = var.snapshot_retention_policy.max_retention_days
+      on_source_disk_delete = var.snapshot_retention_policy.on_source_disk_delete
+    }
+
+    schedule {
+      dynamic "daily_schedule" {
+        for_each = var.snapshot_schedule.daily_schedule == null ? [] : [var.snapshot_schedule.daily_schedule]
+        content {
+          days_in_cycle = daily_schedule.value.days_in_cycle
+          start_time    = daily_schedule.value.start_time
+        }
+      }
+
+      dynamic "hourly_schedule" {
+        for_each = var.snapshot_schedule.hourly_schedule == null ? [] : [var.snapshot_schedule.hourly_schedule]
+        content {
+          hours_in_cycle = hourly_schedule.value["hours_in_cycle"]
+          start_time     = hourly_schedule.value["start_time"]
+        }
+      }
+
+      dynamic "weekly_schedule" {
+        for_each = var.snapshot_schedule.weekly_schedule == null ? [] : [var.snapshot_schedule.weekly_schedule]
+        content {
+          dynamic "day_of_weeks" {
+            for_each = weekly_schedule.value.day_of_weeks
+            content {
+              day        = day_of_weeks.value["day"]
+              start_time = day_of_weeks.value["start_time"]
+            }
+          }
+        }
+      }
+    }
+
+    dynamic "snapshot_properties" {
+      for_each = var.snapshot_properties == null ? [] : [var.snapshot_properties]
+      content {
+        guest_flush       = snapshot_properties.value["guest_flush"]
+        labels            = snapshot_properties.value["labels"]
+        storage_locations = snapshot_properties.value["storage_locations"]
+      }
+    }
+  }
+
+  depends_on = [null_resource.module_depends_on,google_compute_instance.tpl]
+}
+
+resource "google_compute_disk_resource_policy_attachment" "attachment" {
+  for_each = toset(local.instance_disks)
+  name     = google_compute_resource_policy.policy.name
+  project  = element(split("/", each.key), index(split("/", each.key), "projects", ) + 1, )
+  disk     = element(split("/", each.key), index(split("/", each.key), "disks", ) + 1, )
+  zone     = element(split("/", each.key), index(split("/", each.key), "zones", ) + 1, )
+
+  depends_on = [null_resource.module_depends_on,google_compute_instance.tpl]
+}
