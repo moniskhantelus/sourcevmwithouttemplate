@@ -236,7 +236,7 @@ resource "null_resource" "module_depends_on" {
   }
   depends_on = [ google_compute_instance.tpl ]
 }
-
+/*
 resource "google_compute_resource_policy" "policy" {
   name    = var.name
   project = var.project_id
@@ -291,10 +291,10 @@ resource "google_compute_resource_policy" "policy" {
 
   depends_on = [null_resource.module_depends_on,google_compute_instance.tpl]
 }
-
+*/
 resource "google_compute_disk_resource_policy_attachment" "attachment" {
   for_each = toset(local.instance_disks)
-  name     = google_compute_resource_policy.policy.name
+  name     = var.name //google_compute_resource_policy.policy.name
   project  = element(split("/", each.key), index(split("/", each.key), "projects", ) + 1, )
   disk     = element(split("/", each.key), index(split("/", each.key), "disks", ) + 1, )
   zone     = element(split("/", each.key), index(split("/", each.key), "zones", ) + 1, )
