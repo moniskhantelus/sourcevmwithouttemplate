@@ -49,7 +49,7 @@ resource "google_compute_disk" "from_snapshot" {
   count       = var.use_image == false ? 1 : 0
   project     = var.project_id
   name        = var.snapshot_name
-  size        = 200    
+  size        = var.disk_size_gb   
   type        = "pd-standard"  
   zone        = var.zone
   snapshot = data.google_compute_snapshot.latest_snapshot.self_link
